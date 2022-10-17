@@ -1,0 +1,275 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-promethe-prometheus
+  namespace: monitor
+  labels:
+    app: kube-prometheus-stack-prometheus
+    app.kubernetes.io/name: kube-prometheus-stack-prometheus
+    app.kubernetes.io/component: prometheus
+    app.kubernetes.io/version: "34.9.0"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-promethe-prometheus
+  labels:
+    app: kube-prometheus-stack-prometheus
+    app.kubernetes.io/version: "34.9.0"
+rules:
+# This permission are not in the kube-prometheus repo
+# they're grabbed from https://github.com/prometheus/prometheus/blob/master/documentation/examples/rbac-setup.yml
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/metrics
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - "networking.k8s.io"
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
+  verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-promethe-prometheus
+  labels:
+    app: kube-prometheus-stack-prometheus
+    app.kubernetes.io/version: "34.9.0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-promethe-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: kube-promethe-prometheus
+    namespace: monitor
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: scrape-config-secret
+  namespace: monitor
+  labels:
+    app: kube-prometheus-stack-prometheus
+    app.kubernetes.io/version: "34.9.0"
+stringData:
+  additional-scrape-configs.yaml: |
+    - job_name: 'ingress-nginx-endpoints'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - ingress-nginx
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scheme]
+        action: replace
+        target_label: __scheme__
+        regex: (https?)
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        target_label: __address__
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+      - source_labels: [__meta_kubernetes_service_name]
+        regex: kube-promethe-prometheus
+        action: drop
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: kube-promethe-prometheus
+  namespace: monitor
+  labels:
+    app: kube-prometheus-stack-prometheus
+    prometheus: kube-promethe-prometheus
+    app.kubernetes.io/version: "34.9.0"
+spec:
+  alerting:
+    alertmanagers:
+      - namespace: monitor
+        name: kube-promethe-alertmanager
+        port: http-web
+        pathPrefix: "/"
+        apiVersion: v2
+  image: "quay.io/prometheus/prometheus:v2.34.0"
+  version: v2.34.0
+  externalUrl: http://kube-promethe-prometheus:9090
+  paused: false
+  replicas: 3
+  shards: 1
+  externalLabels:
+    cluster: dev-prometheus
+  scrapeInterval: 30s
+  evaluationInterval: 30s
+  logLevel:  info
+  logFormat:  logfmt
+  listenLocal: false
+  enableAdminAPI: false
+  # 本地数据保存时长
+  retention: "10d"
+  # 远程存储
+  # remoteWrite:
+  #   - url: http://xxxxx/write
+  routePrefix: "/"
+  serviceAccountName: kube-promethe-prometheus
+  # serviceMonitorSelector 标签为 servicemonitor 必须匹配此 labels
+  serviceMonitorSelector: {}
+  serviceMonitorNamespaceSelector: {}
+  podMonitorSelector: {}
+  podMonitorNamespaceSelector: {}
+  probeSelector: {}
+  probeNamespaceSelector: {}
+  securityContext:
+    fsGroup: 2000
+    runAsGroup: 2000
+    runAsNonRoot: true
+    runAsUser: 1000
+  ruleNamespaceSelector: {}
+  additionalScrapeConfigs:
+    name: scrape-config-secret
+    key: additional-scrape-configs.yaml
+  # 定义 rule 必须有如下 labels 才会被记录到 prometheus:9090/rules 下
+  ruleSelector:
+    matchLabels:
+      app: kube-prometheus-stack
+  disableCompaction: true
+  portName: http-web
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-promethe-prometheus
+  namespace: monitor
+  labels:
+    app: kube-prometheus-stack-prometheus
+    app.kubernetes.io/version: "34.9.0"
+    self-monitor: "true"
+spec:
+  ports:
+  - name: http-web
+    port: 9090
+    targetPort: 9090
+  publishNotReadyAddresses: false
+  selector:
+    app.kubernetes.io/name: prometheus
+    prometheus: kube-promethe-prometheus
+  type: "ClusterIP"
+
+---
+apiVersion: v1
+kind: List
+metadata:
+  name: kube-promethe-prometheus-serviceperreplica
+  namespace: monitor
+items:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: kube-promethe-prometheus-0
+      namespace: monitor
+      labels:
+        app: kube-prometheus-stack-prometheus
+        app.kubernetes.io/version: "34.9.0"
+    spec:
+      ports:
+        - name: http-web
+          port: 9090
+          targetPort: 9090
+      selector:
+        app.kubernetes.io/name: prometheus
+        prometheus: kube-promethe-prometheus
+        statefulset.kubernetes.io/pod-name: prometheus-kube-promethe-prometheus-0
+      type: "ClusterIP"
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: kube-promethe-prometheus-1
+      namespace: monitor
+      labels:
+        app: kube-prometheus-stack-prometheus
+        app.kubernetes.io/version: "34.9.0"
+    spec:
+      ports:
+        - name: http-web
+          port: 9090
+          targetPort: 9090
+      selector:
+        app.kubernetes.io/name: prometheus
+        prometheus: kube-promethe-prometheus
+        statefulset.kubernetes.io/pod-name: prometheus-kube-promethe-prometheus-1
+      type: "ClusterIP"
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: kube-promethe-prometheus-2
+      namespace: monitor
+      labels:
+        app: kube-prometheus-stack-prometheus
+        app.kubernetes.io/version: "34.9.0"
+    spec:
+      ports:
+        - name: http-web
+          port: 9090
+          targetPort: 9090
+      selector:
+        app.kubernetes.io/name: prometheus
+        prometheus: kube-promethe-prometheus
+        statefulset.kubernetes.io/pod-name: prometheus-kube-promethe-prometheus-2
+      type: "ClusterIP"
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kube-promethe-prometheus
+  namespace: monitor
+  labels:
+    app: kube-prometheus-stack-prometheus
+    app.kubernetes.io/version: "34.9.0"
+spec:
+  selector:
+    matchLabels:
+      app: kube-prometheus-stack-prometheus
+      self-monitor: "true"
+  namespaceSelector:
+    matchNames:
+      - "monitor"
+  endpoints:
+  - port: http-web
+    path: "/metrics"
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prometheus
+  namespace: monitor
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: prometheus.jicki.cn
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kube-promethe-prometheus
+            port:
+              number: 9090
