@@ -131,14 +131,14 @@ spec:
     spec:
       containers:
         - name: kube-prometheus-stack
-          image: "reg.deeproute.ai/deeproute-public/prometheus-operator:v0.55.1"
+          image: "quay.io/prometheus-operator/prometheus-operator:v0.55.1"
           imagePullPolicy: "IfNotPresent"
           args:
             - --log-format=logfmt
             - --log-level=info
             - --kubelet-service=kube-system/kube-promethe-kubelet
             - --localhost=127.0.0.1
-            - --prometheus-config-reloader=reg.deeproute.ai/deeproute-public/prometheus-config-reloader:v0.55.1
+            - --prometheus-config-reloader=quay.io/prometheus-operator/prometheus-config-reloader:v0.55.1
             - --config-reloader-cpu-request=200m
             - --config-reloader-cpu-limit=200m
             - --config-reloader-memory-request=50Mi
